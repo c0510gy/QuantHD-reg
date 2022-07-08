@@ -32,12 +32,15 @@ def binarize(X):
 
 # X should be the class matrix of shape nClasses * D
 # 0 is mapped to most lowest value and 2^(bits)-1 highest
-def quantize(X, bits):
+def quantize(X, bits, std=None):
     Nbins = 2**bits
     # ultimate cheess
     bins = [ (i/(Nbins)) for i in range(Nbins)]
    # notice the axis along which to normalize is always the last one
-    nX = stats.norm.cdf(stats.zscore(X, axis = X.ndim-1))
+    if std is None:
+        nX = stats.norm.cdf(stats.zscore(X, axis = X.ndim-1))
+    else: 
+        nX = stats.norm.cdf((X - 0) / std)
     nX = np.digitize(nX, bins) - 1
     #print("Max and min bin value:", np.max(nX), np.min(nX))
     #print("Quantized from ", X)
@@ -61,10 +64,12 @@ def hamming_map(vec1, vec2, std, mapping):
 
 class QHD_reg:
 
-    def __init__(self, D, bits):
+    def __init__(self, D, bits, quant_norm=False, fix_quant_std=None):
 
         self.D = D
         self.bits = bits # if bits == -1, full precision
+        self.quant_norm = quant_norm
+        self.fix_quant_std = fix_quant_std # 32
         self.model = np.zeros((D))
         self.quantized_model = np.zeros((D))
 
@@ -74,9 +79,20 @@ class QHD_reg:
         
         self.model += lr * (target_y - pred_y) * query
 
+    def quantize(self, vec):
+
+        ret = quantize(vec, self.bits, self.fix_quant_std)
+        if self.quant_norm:
+            ret = ret.astype('float64')
+            ret /= float(2**self.bits - 1)
+
+            ret = (ret - 0.5) * 2
+        
+        return ret
+
     def predict(self, query, std=None, mapping=None):
 
-        qsample = quantize(query, self.bits) if self.bits > 0 else query
+        qsample = self.quantize(query) if self.bits > 0 else query
 
         if self.bits == -1:
             return np.dot(qsample, self.model)
@@ -120,7 +136,7 @@ class QHD_reg:
 
             return -1
         
-        self.quantized_model = quantize(self.model, self.bits)
+        self.quantized_model = self.quantize(self.model)
 
         return -1
     
